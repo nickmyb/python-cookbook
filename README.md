@@ -1,4 +1,7 @@
-python-cookbook
-===============
+Notes 4 "`Python Cookbook, 3rd Edition`"
+========================================
 
-Code samples from the "Python Cookbook, 3rd Edition", published by O'Reilly &amp; Associates, May, 2013. 
+## 参考项目
+
+- [随书源码](https://github.com/dabeaz/python-cookbook)
+- [中文翻译项目](https://github.com/yidao620c/python3-cookbook)
