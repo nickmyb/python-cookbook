@@ -90,3 +90,107 @@ _v = 2
 spam_3()
 
 ```
+
+## 7.6 定义匿名或内联函数
+
+```python
+# 只能使用单个表达式,并且由于":"所以typing hints也不能使用
+add = lambda x, y: x + y
+
+```
+
+## 7.7 匿名函数捕获变量值
+
+```python
+# lambda expression is a free variable that gets bound at runtime, not definition time
+# lambda表达式运行时绑定
+l = lambda y: x + y
+x = 10
+l(10)
+x = 20
+l(10)
+
+# 使用默认参数可以实现定义时绑定
+x = 10
+l = lambda y, x=x: x + y
+l(10)
+
+x = 20
+l(10)
+
+funcs = [lambda x: x+n for n in range(5)]
+for f in funcs:
+    print(f(0))
+
+funcs = [lambda x, n=n: x+n for n in range(5)]
+for f in funcs:
+    print(f(0))
+
+```
+
+## 7.8 减少可调用对象的参数个数
+
+```python
+from functools import partial
+
+
+def spam(a, b, c, d):
+    print(a, b, c, d)
+
+
+# partical就是依次传递, 实际传入的*args, 通过partical设置的*args, 合并的**kwargs 
+partial_spam = partial(spam, 1, 2, d=4)
+
+partial_spam(3)
+print(partial_spam.func, partial_spam.args, partial_spam.keywords)
+
+```
+
+## 7.9 将单方法的类转换为函数
+
+```python
+class Runner:
+    def __init__(self, name):
+        self.name = name
+
+    def run(self, times):
+        print(f'{self.name} run for {times} times!')
+
+
+# 使用闭包
+def runner(name):
+    def run(times):
+        print(f'{name} run for {times} times!')
+    return run
+
+```
+
+## 7.10 带额外状态信息的回调函数
+
+```python
+# 除了使用类的成员属性 / 闭包 / partical,还可以使用协程
+def apply_async(func, args, *, callback):
+    # Compute the result
+    result = func(*args)
+    # Invoke the callback with the result
+    callback(result)
+
+
+def add(x, y):
+    return x + y
+
+
+def make_handler():
+    sequence = 0
+    while True:
+        result = yield
+        sequence += 1
+        print('[{}] Got: {}'.format(sequence, result))
+
+
+handler = make_handler()
+next(handler)  # 第一次调用生成器需要先前进到yield,等效于handler.send(None)
+apply_async(add, (2, 3), callback=handler.send)
+apply_async(add, ('hello', 'world'), callback=handler.send)
+
+```
