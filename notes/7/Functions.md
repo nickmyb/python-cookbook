@@ -194,3 +194,92 @@ apply_async(add, (2, 3), callback=handler.send)
 apply_async(add, ('hello', 'world'), callback=handler.send)
 
 ```
+
+## 7.11 内联回调函数
+
+```python
+from queue import Queue
+from functools import wraps
+
+
+class Async:
+    def __init__(self, func, args):
+        self.func = func
+        self.args = args
+
+
+# 这就是一个建议的异步框架,实现十分的高级!
+def inlined_async(f):
+    @wraps(f)
+    def wrapper(*args):
+        # 这部分的还是都是实际runtime的时候赋值的
+        generator = f(*args)
+        queue = Queue()
+        queue.put(None)
+
+        while True:
+            # 如果没有获取到新的内容,这里会被阻塞住,等callback塞回新的值
+            result = queue.get()
+            try:
+                async_obj = generator.send(result)
+                apply_async(async_obj.func, async_obj.args, callback=queue.put)
+            except StopIteration:
+                break
+
+    return wrapper
+
+
+def add(x, y):
+    return x + y
+
+@inlined_async
+def test():
+    print('start test')
+    for i in range(5):
+        ret = yield Async(add, (i, i))
+        print('ret:', ret)
+    print('end test')
+
+
+def apply_async_1(func, args, *, callback):
+    result = func(*args)
+    print('apply_async_1:', result)
+    callback(result)
+
+
+def apply_async_2(func, args, *, callback):
+    result = func(*args)
+    print('apply_async_2:', result)
+    callback(result)
+
+
+apply_async = apply_async_1
+test()
+apply_async = apply_async_2
+test()
+
+```
+
+## 7.12 访问闭包中定义的变量
+
+```python
+def closure():
+    var = 0
+
+    def f():
+        print(var)
+
+    def setter(n):
+        nonlocal var
+        var = n
+
+    f.setter = setter
+    return f
+
+
+f = closure()
+f()
+f.setter(1)
+f()
+
+```
