@@ -373,3 +373,229 @@ class Square:
         return self.edge * self.edge
 
 ```
+
+## 8.11 简化数据结构的初始化
+
+```python
+class Structure:
+    _fields = []
+
+    def __init__(self, *args, **kwargs):
+        if len(args) > len(self._fields):
+            raise AttributeError(f'Structure allows {len(self._fields)} at most!')
+
+        for k, v in zip(self._fields, args):
+            # 其实就是通过setattr设置属性
+            # __slots__ / property 无法通过 __dict__访问
+            setattr(self, k, v)
+
+        for k in self._fields[len(args):]:
+            setattr(self, k, kwargs.pop(k))
+
+        if kwargs:
+            illegal_keys = ', '.join(kwargs)
+            raise AttributeError(f'[{illegal_keys}] are not allowed!')
+
+```
+
+## 8.12 定义接口或者抽象基类
+
+```python
+from abc import ABCMeta, abstractmethod
+
+
+# 抽象基类主要用于配合isinstance做类型检查
+# @abstractmethod可以添加staticmethod/classmethod/property装饰器但abstractmethod需要为第一层(最靠近实际方法层)
+class IStream(metaclass=ABCMeta):
+    @abstractmethod
+    def read(self, maxbytes=-1):
+        pass
+
+    @abstractmethod
+    def write(self, data):
+        pass
+
+# 抽象类实现一: 继承
+class SocketStream(IStream):
+    def read(self, maxbytes=-1):
+        pass
+
+    def write(self, data):
+        pass
+
+# 抽象类实现二: 注册
+import io
+
+
+IStream.register(io.IOBase)
+f = open('spam.txt')
+isinstance(f, IStream)
+```
+
+## 8.13 实现数据模型的类型约束
+
+```python
+# 方式一: Descriptor
+class Descriptor:
+    def __init__(self, name=None, **kwargs):
+        self.name = name
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __set__(self, instance, value):
+        # 这里如果用setattr会导致RecursionError,又进到self.attr = value,死循环
+        # setattr(instance, self.name, value)
+        # 描述器如果只是从底层实例字典中获取某个属性值的话不需要定义__get__,默认会先从__dict__中找这个属性
+        instance.__dict__[self.name] = value
+
+class LegalType(Descriptor):
+    legal_type = type(None)
+
+    def __set__(self, instance, value):
+        if isinstance(value, self.legal_type):
+            super().__set__(instance, value)
+        else:
+            raise TypeError(f'{self.name} must be {legal_type}!')
+
+class Sized(Descriptor):
+    def __init__(self, name=None, **kwargs):
+        if 'max_size' not in kwargs:
+            raise TypeError('missing max_size param!')
+        super().__init__(name, **kwargs)
+
+    def __set__(self, instance, value):
+        if len(value) > self.max_size:
+            raise AttributeError(f"{self.name}'s length is {self.max_size} at most!")
+        super().__set__(instance, value)
+
+class SizedString(LegalType, Sized):
+    legal_type = str
+
+class Person:
+    name = SizedString(name='name', max_size=10)
+
+    def __init__(self, name):
+        self.name = name
+
+
+p = Person(name='nick')
+
+
+# 方式二: decorator
+def attributes_checker(**kwargs):
+    def decorator(cls):
+        for k, v in kwargs.items():
+            v.name = k
+            setattr(cls, k, v)
+        return cls
+    return decorator
+
+
+@attributes_checker(name=SizedString(max_size=10))
+class Student:
+    def __init__(self, name):
+        self.name = name
+
+
+# 方式三: metaclass
+class AttributesCheckMeta(type):
+    def __new__(cls, clsname, bases, methods):
+        for k, v in methods.items():
+            if isinstance(v, Descriptor):
+                # methods中含有类似__module__ / __qualname__的额外属性
+                v.name = k
+        return type.__new__(cls, clsname, bases, methods)
+
+
+class Employee(metaclass=AttributesCheckMeta):
+    name = SizedString(max_size=10)
+    def __init__(self, name):
+        self.name = name
+
+
+# 方式四: 装饰器代替类继承,速度更快
+def Unsigned(cls):
+    super_set = cls.__set__
+    def __set__(self, instance, value):
+        if value < 0:
+            raise ValueError('value must be bigger than 0!')
+        super_set(self, instance, value)
+    cls.__set__ = __set__
+    return cls
+
+
+@Unsigned
+class Unsigned(Descriptor):
+    pass
+
+```
+
+## 8.14 实现自定义容器
+
+```python
+# DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.9 it will stop working
+import collections.abc
+
+
+# collections实现了很多抽象基类
+# 很多抽象类会为一些常见容器操作提供默认的实现
+# MutableSequence就实现了append / remove / count
+class Items(collections.abc.MutableSequence):
+    def __init__(self, initial=None):
+        self._items = list(initial) if initial is not None else []
+
+    def __getitem__(self, index):
+        print('Getting:', index)
+        return self._items[index]
+
+    def __setitem__(self, index, value):
+        print('Setting:', index, value)
+        self._items[index] = value
+
+    def __delitem__(self, index):
+        print('Deleting:', index)
+        del self._items[index]
+
+    def insert(self, index, value):
+        print('Inserting:', index, value)
+        self._items.insert(index, value)
+
+    def __len__(self):
+        print('Len')
+        return len(self._items)
+
+```
+
+## 8.15 属性的代理访问
+
+```python
+class Proxy:
+    def __init__(self, obj):
+        self._obj = obj
+
+    def __getattr__(self, name):
+        # 属性不存在时才会调用__getattr__
+        # 可以调用例如Proxy().__len__, 但不能调用len(Proxy()),需要对Proxy定义__len__
+        print('getattr:', name)
+        return getattr(self._obj, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            print('setattr:', name, value)
+            setattr(self._obj, name, value)
+
+    def __delattr__(self, name):
+        if name.startswith('_'):
+            super().__delattr__(name)
+        else:
+            print('delattr:', name)
+            delattr(self._obj, name)
+
+
+p = Proxy([])
+p.__len__()
+len(p)
+
+```
