@@ -94,7 +94,10 @@ with conn as s1:
 ```python
 class Date:
     # __slots__初衷是作为内存优化的工具,占用内存大小类似tuple,并且不能再添加额外属性,对于类的一些操作也不再支持
-    __slots__ = ['year', 'month', 'day'
+    # __slots__ 和 __getitem__是不同的,不会相互覆盖影响
+    # __slots__: 对应 obj.attr
+    # __getitem__: 对应 obj[attr]
+    __slots__ = ['year', 'month', 'day']
     
     def __init__(self, year, month, day):
         self.year = year
@@ -597,5 +600,279 @@ class Proxy:
 p = Proxy([])
 p.__len__()
 len(p)
+
+```
+
+## 8.16 在类中定义多个构造器
+
+```python
+class Constructor:
+    def __init__(self, name):
+        self.name = name
+
+    @classmethod
+    def constructor(cls, name):
+        return cls(f'Constructor({name})')
+
+
+c1 = Constructor('Hello')
+c2 = Constructor.constructor('Hello')
+
+```
+
+## 8.17 创建不调用init方法的实例
+
+```python
+class Constructor:
+    def __init__(self, name):
+        self.name = name
+
+    @classmethod
+    def constructor(cls, name):
+        return cls(f'Constructor({name})')
+
+    @classmethod
+    def constructor_new_1(cls):
+        c = Constructor.__new__(Constructor)
+        c.name = 'constructor_new_1'
+        return c
+
+    @classmethod
+    def constructor_new_2(cls):
+        c = object.__new__(Constructor)
+        c.name = 'constructor_new_2'
+        return c
+
+    @classmethod
+    def constructor_new_3(cls):
+        c = cls.__new__(cls)
+        c.name = 'constructor_new_3'
+        return c
+
+```
+
+## 8.18 利用Mixins扩展类功能
+
+```python
+class LoggedMappingMixin:
+    # Mixin不能直接被实例化使用: 没有__init__
+    # Mixin没有自己的状态信息: 没有实例属性
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        print('Getting ' + str(key))
+        return super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        print('Setting {} = {!r}'.format(key, value))
+        return super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        print('Deleting ' + str(key))
+        return super().__delitem__(key)
+
+# LoggedMappingMixin需要在前,否则先调用dict的方法
+class LoggedDictDemo(LoggedMappingMixin, dict):
+    pass
+
+class LoggedDictMagic(LoggedMappingMixin, dict):
+    __slots__ = ('name')
+
+
+d = LoggedDictMagic()
+d['name'] = 'logged_dict_magic'
+d['type'] = 'LoggedDictMagic'
+d['name']
+d['type']
+d.name = 'd.name'
+d.name
+d.type = 'd.type'
+d.type
+
+```
+
+## 8.19 实现状态对象或者状态机
+
+```python
+# 为每个状态定义一个对象,避免过多的if判断
+# 方式一: 通过__class__直接切换实例类型
+class Connection:
+    def __init__(self):
+        self.new_state(ClosedConnection)
+
+    def new_state(self, state):
+        print('old self.__class__:', self.__class__)
+        self.__class__ = state
+        print('new self.__class__:', self.__class__)
+
+    def read(self):
+        raise NotImplementedError()
+
+    def write(self, data):
+        raise NotImplementedError()
+
+    def open(self):
+        raise NotImplementedError()
+
+    def close(self):
+        raise NotImplementedError()
+
+class ClosedConnection(Connection):
+    def read(self):
+        raise RuntimeError('Not open')
+
+    def write(self, data):
+        raise RuntimeError('Not open')
+
+    def open(self):
+        self.new_state(OpenConnection)
+
+    def close(self):
+        raise RuntimeError('Already closed')
+
+class OpenConnection(Connection):
+    def read(self):
+        print('reading')
+
+    def write(self, data):
+        print('writing')
+
+    def open(self):
+        raise RuntimeError('Already open')
+
+    def close(self):
+        self.new_state(ClosedConnection)
+
+# Example
+if __name__ == '__main__':
+    c = Connection()
+    print(c)
+    try:
+        c.read()
+    except RuntimeError as e:
+        print(e)
+
+    print('old type:', type(c))
+    c.open()
+    print('new type:', type(c))
+    print(c)
+    c.read()
+    c.close()
+    print(c)
+
+# 方式二: 代理
+class Connection:
+    def __init__(self):
+        self.new_state(ClosedConnectionState)
+
+    def new_state(self, newstate):
+        self._state = newstate
+
+    def read(self):
+        return self._state.read(self)
+
+    def write(self, data):
+        return self._state.write(self, data)
+
+    def open(self):
+        return self._state.open(self)
+
+    def close(self):
+        return self._state.close(self)
+
+class ConnectionState:
+    @staticmethod
+    def read(conn):
+        raise NotImplementedError()
+
+    @staticmethod
+    def write(conn, data):
+        raise NotImplementedError()
+
+    @staticmethod
+    def open(conn):
+        raise NotImplementedError()
+
+    @staticmethod
+    def close(conn):
+        raise NotImplementedError()
+
+class ClosedConnectionState(ConnectionState):
+    @staticmethod
+    def read(conn):
+        raise RuntimeError('Not open')
+
+    @staticmethod
+    def write(conn, data):
+        raise RuntimeError('Not open')
+
+    @staticmethod
+    def open(conn):
+        conn.new_state(OpenConnectionState)
+
+    @staticmethod
+    def close(conn):
+        raise RuntimeError('Already closed')
+
+class OpenConnectionState(ConnectionState):
+    @staticmethod
+    def read(conn):
+        print('reading')
+
+    @staticmethod
+    def write(conn, data):
+        print('writing')
+
+    @staticmethod
+    def open(conn):
+        raise RuntimeError('Already open')
+
+    @staticmethod
+    def close(conn):
+        conn.new_state(ClosedConnectionState)
+
+
+if __name__ == '__main__':
+    c = Connection()
+    print(c)
+    try:
+        c.read()
+    except RuntimeError as e:
+        print(e)
+
+    c.open()
+    print(c)
+    c.read()
+    c.close()
+    print(c)
+
+```
+
+## 8.20 通过字符串调用对象方法
+
+```python
+import operator
+
+
+class Calculator:
+    @staticmethod
+    def static_add(x, y):
+        return x + y
+
+    def class_add(cls, x, y):
+        return x + y
+
+    def instance_add(self, x, y):
+        return x + y
+
+c = Calculator()
+getattr_static_added_result = getattr(Calculator, 'static_add')(0, 1)
+getattr_class_added_result = getattr(Calculator, 'class_add')(Calculator, 1, 2)
+getattr_instance_added_result = getattr(c, 'instance_add')(2, 3)
+
+
+operator_static_added_result = operator.methodcaller('static_add', 0, 1)(Calculator)
+operator_class_added_result = operator.methodcaller('class_add', Calculator, 1, 2)(Calculator)
+operator_instance_added_result = operator.methodcaller('instance_add', 2, 3)(c)
 
 ```
