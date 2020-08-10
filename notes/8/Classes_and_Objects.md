@@ -876,3 +876,304 @@ operator_class_added_result = operator.methodcaller('class_add', Calculator, 1, 
 operator_instance_added_result = operator.methodcaller('instance_add', 2, 3)(c)
 
 ```
+
+## 8.21 实现访问者模式
+
+这个访问者模式只理解了个大概,看懂了但自己写不出来
+
+```python
+class Node:
+    pass
+
+class UnaryOperator(Node):
+    def __init__(self, operand):
+        self.operand = operand
+
+class BinaryOperator(Node):
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+class Add(BinaryOperator):
+    pass
+
+class Sub(BinaryOperator):
+    pass
+
+class Mul(BinaryOperator):
+    pass
+
+class Div(BinaryOperator):
+    pass
+
+class Negate(UnaryOperator):
+    pass
+
+class Number(Node):
+    def __init__(self, value):
+        self.value = value
+
+class NodeVisitor:
+    def visit(self, node):
+        methname = 'visit_' + type(node).__name__
+        meth = getattr(self, methname, None)
+        if meth is None:
+            meth = self.generic_visit
+        return meth(node)
+
+    def generic_visit(self, node):
+        raise RuntimeError('No {} method'.format('visit_' + type(node).__name__))
+
+class Evaluator(NodeVisitor):
+    def visit_Number(self, node):
+        return node.value
+
+    def visit_Add(self, node):
+        return self.visit(node.left) + self.visit(node.right)
+
+    def visit_Sub(self, node):
+        return self.visit(node.left) - self.visit(node.right)
+
+    def visit_Mul(self, node):
+        return self.visit(node.left) * self.visit(node.right)
+
+    def visit_Div(self, node):
+        return self.visit(node.left) / self.visit(node.right)
+
+    def visit_Negate(self, node):
+        return -node.operand
+
+
+t1 = Sub(Number(3), Number(4))
+t2 = Mul(Number(2), t1)
+t3 = Div(t2, Number(5))
+t4 = Add(Number(1), t3)
+
+
+e = Evaluator()
+print('1 + 2 * (3 - 4) / 5 =', e.visit(t4))
+
+```
+
+## 8.22 不用递归实现访问者模式
+
+讲道理涉及到生成器的代码暂时只能在debug下勉强看懂,完全写不出来- -|||
+
+```python
+import types
+
+class Node:
+    pass
+
+class Visit:
+    def __init__(self, node):
+        self.node = node
+
+class NodeVisitor:
+    def visit(self, node):
+        stack = [ Visit(node) ]
+        last_result = None
+        while stack:
+            try:
+                last = stack[-1]
+                if isinstance(last, types.GeneratorType):
+                    stack.append(last.send(last_result))
+                    last_result = None
+                elif isinstance(last, Visit):
+                    stack.append(self._visit(stack.pop().node))
+                else:
+                    last_result = stack.pop()
+            except StopIteration:
+                stack.pop()
+        return last_result
+
+    def _visit(self, node):
+        methname = 'visit_' + type(node).__name__
+        meth = getattr(self, methname, None)
+        if meth is None:
+            meth = self.generic_visit
+        return meth(node)
+
+    def generic_visit(self, node):
+        raise RuntimeError('No {} method'.format('visit_' + type(node).__name__))
+
+class UnaryOperator(Node):
+    def __init__(self, operand):
+        self.operand = operand
+
+class BinaryOperator(Node):
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+class Add(BinaryOperator):
+    pass
+
+class Sub(BinaryOperator):
+    pass
+
+class Mul(BinaryOperator):
+    pass
+
+class Div(BinaryOperator):
+    pass
+
+class Negate(UnaryOperator):
+    pass
+
+class Number(Node):
+    def __init__(self, value):
+        self.value = value
+
+class Evaluator(NodeVisitor):
+    def visit_Number(self, node):
+        return node.value
+
+    def visit_Add(self, node):
+        yield (yield Visit(node.left)) + (yield Visit(node.right))
+
+    def visit_Sub(self, node):
+        yield (yield Visit(node.left)) - (yield Visit(node.right))
+
+    def visit_Mul(self, node):
+        yield (yield Visit(node.left)) * (yield Visit(node.right))
+
+    def visit_Div(self, node):
+        yield (yield Visit(node.left)) / (yield Visit(node.right))
+
+    def visit_Negate(self, node):
+        yield -(yield Visit(node.operand))
+
+
+if __name__ == '__main__':
+    # 1 + 2 * (3 - 4) / 5
+    t1 = Sub(Number(3), Number(4))
+    t2 = Mul(Number(2), t1)
+    t3 = Div(t2, Number(5))
+    t4 = Add(Number(1), t3)
+
+    e = Evaluator()
+    print(e.visit(t4))
+
+
+    a = Number(0)
+    for n in range(1, 100000):
+        a = Add(a, Number(n))
+
+    try:
+        print(e.visit(a))
+    except RuntimeError as e:
+        print(e)
+
+```
+
+## 8.23 循环引用数据结构的内存管理
+
+引用和垃圾回收是没有讲清楚的,后面需要找别的文章再研究研究
+
+```python
+import weakref
+
+
+class Node:
+    def __init__(self, value):
+        self.value = value
+        self._parent = None
+        self.children = []
+
+    def __repr__(self):
+        # 弱引用就是一个对象指针, 它不会增加它的引用计数
+        # 但是必须重写 __repr__ 且不能调用到object的__repr__, 否则好像仍然会导致循环引用
+        return 'Node({!r:})'.format(self.value)
+
+    @property
+    def parent(self):
+        return self._parent if self._parent is None else self._parent()
+
+    @parent.setter
+    def parent(self, p):
+        self._parent = weakref.ref(p)
+
+    def add_child(self, node):
+        node.parent = self
+        self.children.append(node)
+
+
+parent = Node(1)
+son = Node(2)
+parent.add_child(son)
+print(son.parent)
+del parent
+print(son.parent)
+
+# gc.collect() 触发时机不确定并且自定义__del__时更容易导致问题
+
+```
+
+## 8.24 让类支持比较操作
+
+```python
+from functools import total_ordering
+
+
+# 需要定义 __eq__ 和一个其他的比较方法即可
+@total_ordering
+class Circle:
+    def __init__(self, r):
+        self.r = r
+
+    def __eq__(self, other):
+        return self.r == other.r
+
+    def __lt__(self, other):
+        return self.r < other.r
+
+
+c1 = Circle(1)
+c2 = Circle(2)
+c2 > c1
+
+```
+
+## 8.25 创建缓存实例
+
+```python
+import weakref
+
+
+class SpamCacheManager:
+    def __init__(self):
+        self._cache = weakref.WeakValueDictionary()
+
+    def get_cache(self, name):
+        if name not in self._cache:
+            # 不能把下面两行缩写为 self._cache[name] = Spam.create(name)
+            # 否则只有WeakValueDictionary指向这个对象会被回收
+            spam = Spam.create(name)
+            self._cache[name] = spam
+        return self._cache[name]
+
+    def clear(self):
+        self._cache.clear()
+
+
+class Spam:
+    cache_manager = SpamCacheManager()
+
+    def __init__(self, name):
+        raise Exception('__init__ is not allowed!')
+
+    @classmethod
+    def create(cls, name):
+        spam = Spam.__new__(Spam)
+        spam.name = name
+        return spam
+
+    @classmethod
+    def get(cls, name):
+        return cls.cache_manager.get_cache(name)
+
+    def clear(self):
+        self.cache_manager.clear()
+
+```
